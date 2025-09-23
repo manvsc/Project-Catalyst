@@ -43,7 +43,6 @@ def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
 # -----------------------------
 def run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
     tag = f"alpha_{str(alpha).replace('.','p')}_theta_{str(theta).replace('.','p')}"
-    summary_csv  = os.path.join(out_dir, f"{tag}_summary_by_quota.csv")
     combined_plot = os.path.join(out_dir, f"{tag}_combined_curve.pdf")
 
     Q = len(q_ratios)
@@ -54,24 +53,22 @@ def run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
         W = draw_weights_gamma(n, alpha, theta)
         w_norm = W / np.sum(W)
 
+        # Raw Banzhaf pivot probabilities per player and quota
         b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
-        ratios = b_grid / w_norm[:, None]
+        # Normalize Banzhaf across players for each quota (columns sum to 1)
+        col_sums = b_grid.sum(axis=0, keepdims=True)
+        bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
+        # Ratio of normalized Banzhaf to normalized weights
+        ratios = bn_grid / w_norm[:, None]
         means_MQ[m, :] = ratios.mean(axis=0)
         vars_MQ[m, :]  = ratios.var(axis=0)
 
-    # Aggregate across draws
+    # Aggregate across draws (for plotting confidence bands)
     def ci95(samples):
         samples = np.asarray(samples, dtype=float)
         m = float(np.mean(samples))
         se = float(np.std(samples, ddof=1) / np.sqrt(len(samples))) if len(samples) > 1 else 0.0
         return m, (m - 1.96 * se, m + 1.96 * se), float(np.var(samples, ddof=1)) if len(samples) > 1 else 0.0
-
-    with open(summary_csv, "w") as f:
-        f.write("q_ratio,M,mean_of_means,ci95_mean_lo,ci95_mean_hi,var_of_means,mean_of_vars,ci95_var_lo,ci95_var_hi,var_of_vars\n")
-        for j, q_ratio in enumerate(q_ratios):
-            mom, (lo_m, hi_m), vom = ci95(means_MQ[:, j])
-            mov, (lo_v, hi_v), vov = ci95(vars_MQ[:, j])
-            f.write(f"{q_ratio},{M},{mom},{lo_m},{hi_m},{vom},{mov},{lo_v},{hi_v},{vov}\n")
 
     # --- Combined plot with two y-axes ---
     mean_of_means = means_MQ.mean(axis=0)
@@ -91,18 +88,18 @@ def run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
     ax1.plot(q_ratios, mean_of_means, color='blue', label='Mean of means')
     ax1.fill_between(q_ratios, lo_mean, hi_mean, color='blue', alpha=0.2)
     ax1.axhline(y=1, color='gray', linestyle='--', linewidth=1)   # reference at 1
-    ax1.set_ylabel("Mean of (b_i / w_i)", color='blue')
+    ax1.set_ylabel("Mean of (bn_i / w_i)", color='blue')
     ax1.tick_params(axis='y', labelcolor='blue')
 
     # Right y-axis: mean-of-vars
     ax2.plot(q_ratios, mean_of_vars, color='red', linestyle='--', label='Mean of vars')
     ax2.fill_between(q_ratios, lo_var, hi_var, color='red', alpha=0.2)
-    ax2.set_ylabel("Variance of (b_i / w_i)", color='red')
+    ax2.set_ylabel("Variance of (bn_i / w_i)", color='red')
     ax2.tick_params(axis='y', labelcolor='red')
 
     ax1.set_xlabel("q (share of total weight)")
     ax1.axvline(x=0.5, color='gray', linestyle='--', linewidth=1)  # reference line at 0.5
-    plt.title(f"Gamma(α={alpha}, θ={theta}) — mean-of-means & mean-of-vars")
+    plt.title(f"Gamma(α={alpha}, θ={theta}) — normalized Banzhaf ratios")
     ax1.grid(True, alpha=0.3)
 
     plt.tight_layout()
