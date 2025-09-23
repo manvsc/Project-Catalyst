@@ -97,7 +97,7 @@ def run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
     ax2.set_ylabel("Variance of (bn_i / w_i)", color='red')
     ax2.tick_params(axis='y', labelcolor='red')
 
-    ax1.set_xlabel("q (share of total weight)")
+    ax1.set_xlabel("quota")
     ax1.axvline(x=0.5, color='gray', linestyle='--', linewidth=1)  # reference line at 0.5
     plt.title(f"Gamma(α={alpha}, θ={theta}) — normalized Banzhaf ratios")
     ax1.grid(True, alpha=0.3)
@@ -112,7 +112,7 @@ def run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
 if __name__ == "__main__":
     n = 100     # number of agents
     M = 100      # number of draws per (alpha, theta)
-    rp = 1000    # number of coalition samples per draw
+    rp = 10000    # number of coalition samples per draw
     PLOT_DIR = "plots/"
     os.makedirs(PLOT_DIR, exist_ok=True)
 
