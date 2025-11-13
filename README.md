@@ -158,3 +158,18 @@ plt.savefig(combined_plot)
 - Replace the Gamma sampler with other weight distributions.
 - Add alternative power indices (e.g., Shapley-Shubik via sampling) for comparison.
 - Export summary CSVs per setting alongside plots.
+
+---
+
+**FirstAgent.py: First Player Variance**
+
+- Purpose: Measure how much the first player’s relative power fluctuates across independent draws by plotting, for each quota, the variance over draws of the ratio bn_1(q)/w_1, where bn_1(q) is the first player’s normalized Banzhaf power at quota q and w_1 is their normalized weight.
+- Per-draw steps:
+  - Sample weights W ~ Gamma(α, θ) and compute normalized weights w_norm.
+  - Estimate Banzhaf pivot probabilities for all players across all quotas using the same vectorized routine as in main.py.
+  - Normalize Banzhaf per quota so columns sum to 1, then compute the first player’s ratio bn_1(q)/w_1 across quotas.
+- Across draws:
+  - For each quota, compute the sample variance over the M draws of that first-player ratio.
+  - Plot this variance vs. quota with a shaded 95% CI band (approximate SE of the sample variance).
+- Outputs: PDFs saved to plots/ named like alpha_{α}_theta_{θ}_first_agent_variance.pdf.
+- Run: python FirstAgent.py (configure n, M, rp, q_ratios, and param_settings at the bottom of the file).
