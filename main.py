@@ -119,17 +119,18 @@ if __name__ == "__main__":
     # quota ratios from 0 to 1
     q_ratios = np.linspace(0, 1, 101)
 
+    # Start with a single setting to preview plots; uncomment more as needed
     param_settings = [
         (0.5, 0.5),
-        (0.5, 1.0),
-        (0.5, 2.0),
-        (1.0, 0.5),
-        (1.0, 1.0),
-        (1.0, 2.0),
-        (2.0, 0.5),
-        (2.0, 1.0),
-        (2.0, 2.0),
-        (5.0, 1.0),
+        # (0.5, 1.0),
+        # (0.5, 2.0),
+        # (1.0, 0.5),
+        # (1.0, 1.0),
+        # (1.0, 2.0),
+        # (2.0, 0.5),
+        # (2.0, 1.0),
+        # (2.0, 2.0),
+        # (5.0, 1.0),
     ]
 
     master_rng = np.random.default_rng(42)

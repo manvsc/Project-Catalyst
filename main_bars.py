@@ -71,16 +71,20 @@ if __name__ == "__main__":
     rp = 10000
 
     # Try different quota ranges / densities
+    # Unified quota densities; no special dense center
     quota_sets = {
         'full_0_1_101': np.linspace(0, 1, 101),
-        'focus_0p2_0p8_41': np.linspace(0.2, 0.8, 41),
-        'dense_center_0p4_0p6_61': np.linspace(0.4, 0.6, 61),
+        'focus_0p05_0p25_41': np.linspace(0.05, 0.25, 41),
+        'focus_0p4_0p6_41': np.linspace(0.4, 0.6, 41),
     }
 
+    # Use same parameter set as in main.py
     param_settings = [
         (0.5, 0.5),
-        (1.0, 1.0),
-        (2.0, 1.0),
+        # (0.5, 1.0), (0.5, 2.0),
+        # (1.0, 0.5), (1.0, 1.0), (1.0, 2.0),
+        # (2.0, 0.5), (2.0, 1.0), (2.0, 2.0),
+        # (5.0, 1.0),
     ]
 
     master_rng = np.random.default_rng(123)
@@ -92,4 +96,3 @@ if __name__ == "__main__":
             rng = np.random.default_rng(master_rng.integers(0, 2**63 - 1))
             run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios)
     print("Done. Bar plots saved under plots_ext/bars/*")
-

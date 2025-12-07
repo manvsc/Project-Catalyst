@@ -79,16 +79,20 @@ if __name__ == "__main__":
     M = 100
     rp = 10000
 
+    # Unified densities across ranges; remove dense center
     quota_sets = {
         'full_0_1_101': np.linspace(0, 1, 101),
-        'focus_0p3_0p7_31': np.linspace(0.3, 0.7, 31),
-        'center_dense_0p45_0p55_41': np.linspace(0.45, 0.55, 41),
+        'focus_0p05_0p25_41': np.linspace(0.05, 0.25, 41),
+        'focus_0p4_0p6_41': np.linspace(0.4, 0.6, 41),
     }
 
+    # Use same parameter set as in main.py
     param_settings = [
         (0.5, 0.5),
-        (1.0, 1.0),
-        (2.0, 1.0),
+        # (0.5, 1.0), (0.5, 2.0),
+        # (1.0, 0.5), (1.0, 1.0), (1.0, 2.0),
+        # (2.0, 0.5), (2.0, 1.0), (2.0, 2.0),
+        # (5.0, 1.0),
     ]
 
     master_rng = np.random.default_rng(99)
@@ -100,4 +104,3 @@ if __name__ == "__main__":
             rng = np.random.default_rng(master_rng.integers(0, 2**63 - 1))
             run_setting(alpha, theta, n, M, rp, out_dir, rng, q_ratios)
     print("Done. Weights-variance plots saved under plots_ext/weights_var/*")
-

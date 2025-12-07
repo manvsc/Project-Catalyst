@@ -11,7 +11,7 @@ High-level overview, how to run, what the code does step-by-step, and annotated 
 
 ---
 
-**What the Script Produces**
+**What the Scripts Produce**
 
 - One PDF per parameter pair `(alpha, theta)` in `plots/`, named like:
   - `alpha_0p5_theta_1p0_combined_curve.pdf`
@@ -21,12 +21,20 @@ High-level overview, how to run, what the code does step-by-step, and annotated 
 
 ---
 
+Additionally, helper scripts produce extended plots under `plots_ext/` with unified quota densities and clearly named ranges:
+- `main_weights_var.py`: adds a weight-variance panel and runs three quota sets with same density: `full_0_1_101`, `focus_0p05_0p25_41`, `focus_0p4_0p6_41`.
+- `main_bars.py`: bar summaries for the same three quota sets.
+- `FirstAgent.py`: variance of the first player's ratio across draws (curve) and a violin+box plot summarizing variance estimates across 100 repeats at a fixed quota (q≈0.50).
+
 **How to Run**
 
 - Requirements: Python 3.9+, `numpy`, `matplotlib`.
 - Quick start:
   - Option A (use your environment):
     - `python main.py`
+    - `python main_weights_var.py`
+    - `python main_bars.py`
+    - `python FirstAgent.py`
   - Option B (fresh venv):
     - `python -m venv .venv && source .venv/bin/activate`
     - `pip install numpy matplotlib`
@@ -171,5 +179,12 @@ plt.savefig(combined_plot)
 - Across draws:
   - For each quota, compute the sample variance over the M draws of that first-player ratio.
   - Plot this variance vs. quota with a shaded 95% CI band (approximate SE of the sample variance).
-- Outputs: PDFs saved to plots/ named like alpha_{α}_theta_{θ}_first_agent_variance.pdf.
+- Outputs:
+  - Curve: `alpha_{α}_theta_{θ}_first_agent_variance_curve.pdf` (variance vs. quota with CI)
+  - Violin+box: `alpha_{α}_theta_{θ}_first_agent_variance_boxplot.pdf` (distribution over 100 repeats at q≈0.50)
+
+Notes on Quota Ranges and Densities
+- We use the same point density for all ranges; no “dense center” variant.
+- Standard sets: `0–1` (101 points), `0.05–0.25` (41 points), and `0.4–0.6` (41 points).
+- This replaces earlier `0.2–0.8` focus ranges with `0.05–0.25` per the updated spec.
 - Run: python FirstAgent.py (configure n, M, rp, q_ratios, and param_settings at the bottom of the file).

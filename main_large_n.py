@@ -63,26 +63,29 @@ if __name__ == "__main__":
     # Larger n variants; compensate by fewer quotas and/or smaller rp
     configs = [
         {
-            'name': 'n500_center31_rp8000',
+            'name': 'n500_focus_0p4_0p6_31',
             'n': 500, 'M': 100, 'rp': 8000,
-            'q_ratios': np.linspace(0.35, 0.65, 31)
+            'q_ratios': np.linspace(0.4, 0.6, 31)
         },
         {
-            'name': 'n1000_center21_rp6000',
+            'name': 'n1000_focus_0p05_0p25_21',
             'n': 1000, 'M': 80, 'rp': 6000,
-            'q_ratios': np.linspace(0.4, 0.6, 21)
+            'q_ratios': np.linspace(0.05, 0.25, 21)
         },
         {
-            'name': 'n500_wide21_rp6000',
+            'name': 'n500_full_0_1_21',
             'n': 500, 'M': 100, 'rp': 6000,
-            'q_ratios': np.linspace(0.2, 0.8, 21)
+            'q_ratios': np.linspace(0, 1, 21)
         },
     ]
 
+    # Use same parameter set as in main.py
     param_settings = [
         (0.5, 0.5),
-        (1.0, 1.0),
-        (2.0, 1.0),
+        # (0.5, 1.0), (0.5, 2.0),
+        # (1.0, 0.5), (1.0, 1.0), (1.0, 2.0),
+        # (2.0, 0.5), (2.0, 1.0), (2.0, 2.0),
+        # (5.0, 1.0),
     ]
 
     master_rng = np.random.default_rng(7)
@@ -94,4 +97,3 @@ if __name__ == "__main__":
             rng = np.random.default_rng(master_rng.integers(0, 2**63 - 1))
             run_setting(alpha, theta, cfg['n'], cfg['M'], cfg['rp'], out_dir, rng, cfg['q_ratios'])
     print("Done. Large-n plots saved under plots_ext/large_n/*")
-
