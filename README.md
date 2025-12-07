@@ -1,190 +1,77 @@
 # Project-Catalyst
 
-High-level overview, how to run, what the code does step-by-step, and annotated snippets.
+Single entry point: main_all.py. It runs all analyses and produces all plots, with clear console progress.
 
-**High-Level Idea**
+**Goal**
+- Study voting power in weighted voting games via Monte Carlo Banzhaf.
+- Compare normalized Banzhaf to normalized weights across quotas and settings.
 
-- Study voting power in weighted voting games using Monte Carlo simulation of the Banzhaf power index.
-- Draw agent weights from a Gamma distribution (parameters α, θ), sweep quota ratios `q ∈ [0, 1]`, and estimate per-player pivot probabilities.
-- Normalize Banzhaf power across players for each quota and compare to normalized weights via the ratio `bn_i / w_i`.
-- Aggregate across many independent draws to understand how power relates to weights across quotas, with confidence intervals, and save one plot per (α, θ) setting.
-
----
-
-**What the Scripts Produce**
-
-- One PDF per parameter pair `(alpha, theta)` in `plots/`, named like:
-  - `alpha_0p5_theta_1p0_combined_curve.pdf`
-- Each PDF is a combined figure with two y-axes over quota ratio `q`:
-  - Left axis (blue): mean of the ratios `bn_i / w_i` across players, with 95% CI bands.
-  - Right axis (red): variance of the ratios `bn_i / w_i` across players, with 95% CI bands.
-
----
-
-Additionally, helper scripts produce extended plots under `plots_ext/` with unified quota densities and clearly named ranges:
-- `main_weights_var.py`: adds a weight-variance panel and runs three quota sets with same density: `full_0_1_101`, `focus_0p05_0p25_41`, `focus_0p4_0p6_41`.
-- `main_bars.py`: bar summaries for the same three quota sets.
-- `FirstAgent.py`: variance of the first player's ratio across draws (curve) and a violin+box plot summarizing variance estimates across 100 repeats at a fixed quota (q≈0.50).
-
-**How to Run**
-
+**Run**
 - Requirements: Python 3.9+, `numpy`, `matplotlib`.
 - Quick start:
-  - Option A (use your environment):
-    - `python main.py`
-    - `python main_weights_var.py`
-    - `python main_bars.py`
-    - `python FirstAgent.py`
-  - Option B (fresh venv):
-    - `python -m venv .venv && source .venv/bin/activate`
-    - `pip install numpy matplotlib`
-    - `python main.py`
-- Outputs land in `plots/`.
+  - `python main_all.py`
+- Outputs land in a single superfolder `plots/` with subfolders:
+  - `curves_default/` (default n combined curves and first-agent plots)
+  - `weights_var/<range>/` (two-panel curves)
+  - `bars/<range>/` (bar summaries)
+  - `large_n/<name>/` (large-n variants per n across all three quota ranges)
 
----
+What `main_all.py` does and outputs
+- Parameters and grids
+  - Parameter settings: list of Gamma shape/scale pairs; first entry `(0.24, 330235.0)` comes from a real-data fit.
+  - Quota grids: `full_0_1_101` (0..1), `focus_0p05_0p25_41` (0.05..0.25), `focus_0p4_0p6_41` (0.4..0.6).
+  - Size knobs: `n` (agents), `M` (draws), `rp` (coalitions per draw).
+- For each `(α, θ)` and each quota grid, the script:
+  1) Samples weights `W ~ Gamma(α, θ)` and normalizes to `w_norm`.
+  2) Estimates Banzhaf pivot probabilities across all quotas using `rp` random coalitions.
+  3) Normalizes Banzhaf across players per quota, forms ratios `bn_i/w_i`.
+  4) Aggregates over players and across `M` draws to compute means, variances, and 95% CIs.
+  5) Saves the following plots:
+    - `plots/curves_default/alpha_*_combined_curve.pdf`: mean and variance of `bn_i/w_i` vs. quota (two y-axes) with 95% CIs.
+    - `plots/weights_var/<range>/alpha_*_combined_curve_with_wvar.pdf`: two panels — top same as combined; bottom shows mean and 95% CI of `Var(w_norm)` across draws.
+    - `plots/bars/<range>/alpha_*_combined_bars.pdf`: bar summaries per quota of mean and variance of `bn_i/w_i` with 95% CIs.
+    - `plots/curves_default/alpha_*_first_agent_variance_curve.pdf`: variance over draws of `bn_1(q)/w_1` vs. quota with 95% CI.
+    - `plots/curves_default/alpha_*_first_agent_variance_boxplot.pdf`: boxplots of the variance estimator at representative quotas over `REPEATS` repeats.
+    - `plots/curves_default/alpha_*_first_agent_w1norm_boxplot.pdf`: boxplot of the first agent’s normalized weight across the `M` draws.
 
-**Configuration (in `main.py`)**
+Behavior note for extreme gamma fit
+- When using the real-data gamma fit `(shape=0.24, scale=330235)`, sampled weights are highly skewed. After normalization, a single agent can dominate, leading to quotas where no coalition pivot events occur. In such cases, the Banzhaf column is all zeros, and plots annotate “some quotas: no pivots”. Bars for those quotas may appear empty because the estimated mean/variance of `bn_i/w_i` is zero across all M draws.
+- Mitigations: increase `M` and `rp` for this parameter and/or focus on quota ranges where pivots are more likely (often near 0.4–0.6 of total weight). The code clamps x-axes to the provided `q_ratios` range so focused plots (e.g., 0.05–0.25) display correct x-limits.
 
-- `n`: number of agents (default 100)
-- `M`: independent draws per parameter setting (default 100)
-- `rp`: Monte Carlo coalitions per draw (default 1000)
-- `q_ratios`: quota sweep (default 0.00 → 1.00 in 0.01 steps)
-- `param_settings`: list of `(alpha, theta)` Gamma parameters to run
-- `PLOT_DIR`: output directory (`plots/`)
-- Reproducibility: master RNG seeded with `42`.
+**Key Settings (edit in main_all.py)**
+This section explains the core ideas that influence runtime and interpretation.
 
-You can narrow `param_settings` to a single pair if you only want one plot.
+Draws (M) vs. Repeats (REPEATS)
+- Draws (M): Independent Monte Carlo replications used to build the main curves (combined, weights-variance, bars) across every quota in the grid. Each draw re-samples weights, estimates Banzhaf across all quotas, computes bn_i/w_i, and aggregates across players. Aggregating over M yields the mean and variance curves with 95% CI bands.
+- Repeats (REPEATS): Only used for the first-agent diagnostic violin/box plots at a subset of representative quotas. For each chosen quota, a repeat runs M draws at that single quota, computes the sample variance of bn_1(q)/w_1 across those M values, and records that one variance number. Repeating this REPEATS times builds a distribution that shows how variable the variance estimator itself is across independent runs.
 
----
+Why use a subset of quotas for repeats
+- Scientific coverage with tractable cost: we choose representative quotas to capture low (0.10, 0.20), center (0.50), and mid-high (0.40, 0.60) regimes. Running repeats for all 101 quotas would be prohibitively slow; the subset offers meaningful insight at a fraction of the compute.
 
-**Step-by-Step: What the Code Does**
+Performance guidance
+- For previews, keep M and REPEATS modest (e.g., M≈20, REPEATS≈20) and optionally reduce rp; this accelerates iteration.
+- For final runs, increase M (e.g., 50–100+) and rp (e.g., 10k+) to tighten CI bands; REPEATS can remain modest unless you specifically need detailed violin diagnostics.
 
-1) Sample weights
-- For each `(alpha, theta)` and for `M` draws: sample `n` agent weights `W ~ Gamma(α, θ)` and compute normalized weights `w_norm = W / sum(W)`.
+**How It Works (at a glance)**
+- For each `(alpha, theta)` and quota grid:
+  1) Sample weights: `W ~ Gamma(α, θ)`, normalize to `w_norm`.
+  2) Monte Carlo Banzhaf: sample `rp` coalitions, compute pivot probabilities for all players and quotas.
+  3) Normalize Banzhaf across players per quota; form ratios `bn_i/w_i`.
+  4) Aggregate across players and across `M` draws to get mean, variance, and 95% CI bands.
+  5) Save plots to the appropriate folder with descriptive filenames.
 
-2) Monte Carlo Banzhaf across quotas
-- For each draw, estimate pivot probabilities for all players simultaneously across all quotas in `q_ratios`:
-  - Sample `rp` random coalitions uniformly (`0/1` membership for each player).
-  - Compute coalition weight sums vectorized.
-  - For each quota, a player is a pivot if excluding them is below quota, but including them reaches or exceeds quota.
+**Console Progress**
+- main_all.py prints global progress for each plot job, e.g., `[7/22] bars n=100 focus_0p4_0p6_41 a=0.5 t=0.5`.
+- Per-plot, it prints periodic counters while iterating over `M` draws (and 100 repeats for the first-agent violin).
 
-3) Normalize and form ratios
-- For each quota column, normalize Banzhaf values across players so they sum to 1 (comparable to normalized weights).
-- Compute ratios `ratios_iq = bn_iq / w_i` for each player `i` and quota `q`.
+**Tips**
+- Reduce `M` and/or `rp` to speed up iteration while testing visual choices.
+- Re-enable more `(alpha, theta)` pairs once satisfied with the layout.
 
-4) Aggregate across players and draws
-- For each draw and quota, compute `mean` and `variance` of `ratios` across players.
-- Across `M` draws, compute mean-of-means and mean-of-variances, plus 95% CIs (via standard error across draws).
-
-5) Plot and save
-- Create a combined plot with two y-axes vs. `q` and save as a PDF per `(alpha, theta)` in `plots/`.
-
----
-
-**Interpreting the Plot**
-
-- If the blue curve (mean of ratios) is near 1, normalized Banzhaf power aligns with normalized weights at that quota.
-- Deviations from 1 indicate systematic advantages/disadvantages relative to raw weights.
-- The red curve (variance) shows dispersion of `bn_i / w_i` across players for the same quota (heterogeneity of relative power).
-
----
-
-**Key Snippets Explained**
-
-1) Drawing Gamma weights
-
-```python
-def draw_weights_gamma(n, alpha, theta):
-    return np.random.gamma(shape=alpha, scale=theta, size=n)
-```
-- Samples `n` iid weights from `Gamma(α=alpha, θ=theta)`.
-
-2) Vectorized Monte Carlo Banzhaf over quotas
-
-```python
-def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
-    n = len(W)
-    Q = len(q_ratios)
-    total = np.sum(W)
-    quotas = q_ratios * total
-
-    # Sample rp coalitions uniformly in {0,1}^n
-    T = rng.integers(0, 2, size=(rp, n), dtype=np.int8)
-    W_mat = T * W
-    sum_total = W_mat.sum(axis=1)           # (rp,)
-    others_sum = sum_total[:, None] - W_mat  # (rp, n)
-
-    b = np.zeros((n, Q))
-    for j, q in enumerate(quotas):
-        include_sum = others_sum + W
-        pivots = (others_sum < q) & (include_sum >= q)
-        b[:, j] = pivots.mean(axis=0)
-    return b
-```
-- Samples random coalitions and checks pivot conditions for all players and quotas in one pass.
-- `pivots.mean(axis=0)` yields pivot probability per player for quota `q`.
-
-3) Normalization, ratios, and aggregation
-
-```python
-b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
-col_sums = b_grid.sum(axis=0, keepdims=True)
-bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
-ratios = bn_grid / w_norm[:, None]
-
-means_MQ[m, :] = ratios.mean(axis=0)
-vars_MQ[m, :]  = ratios.var(axis=0)
-```
-- Normalize Banzhaf across players per quota to compare apples-to-apples with normalized weights.
-- Record per-draw mean and variance of ratios across players for later CI computation.
-
-4) Plotting the combined figure
-
-```python
-fig, ax1 = plt.subplots()
-ax2 = ax1.twinx()
-ax1.plot(q_ratios, mean_of_means, color='blue')
-ax1.fill_between(q_ratios, lo_mean, hi_mean, color='blue', alpha=0.2)
-ax2.plot(q_ratios, mean_of_vars, color='red', linestyle='--')
-ax2.fill_between(q_ratios, lo_var, hi_var, color='red', alpha=0.2)
-plt.savefig(combined_plot)
-```
-- Left axis shows central tendency of `bn_i / w_i`; right axis shows dispersion.
-
----
-
-**Tips & Troubleshooting**
-
-- Runtime vs. accuracy: Increasing `rp` and `M` improves stability but costs time.
-- If you only see one plot, ensure `param_settings` has multiple entries and the run completed (watch console progress `[i/N]`).
-- For very large `n` or `rp`, consider chunking or profiling to manage memory/time.
-
----
-
-**Extending**
-
-- Replace the Gamma sampler with other weight distributions.
-- Add alternative power indices (e.g., Shapley-Shubik via sampling) for comparison.
-- Export summary CSVs per setting alongside plots.
-
----
-
-**FirstAgent.py: First Player Variance**
-
-- Purpose: Measure how much the first player’s relative power fluctuates across independent draws by plotting, for each quota, the variance over draws of the ratio bn_1(q)/w_1, where bn_1(q) is the first player’s normalized Banzhaf power at quota q and w_1 is their normalized weight.
-- Per-draw steps:
-  - Sample weights W ~ Gamma(α, θ) and compute normalized weights w_norm.
-  - Estimate Banzhaf pivot probabilities for all players across all quotas using the same vectorized routine as in main.py.
-  - Normalize Banzhaf per quota so columns sum to 1, then compute the first player’s ratio bn_1(q)/w_1 across quotas.
-- Across draws:
-  - For each quota, compute the sample variance over the M draws of that first-player ratio.
-  - Plot this variance vs. quota with a shaded 95% CI band (approximate SE of the sample variance).
-- Outputs:
-  - Curve: `alpha_{α}_theta_{θ}_first_agent_variance_curve.pdf` (variance vs. quota with CI)
-  - Violin+box: `alpha_{α}_theta_{θ}_first_agent_variance_boxplot.pdf` (distribution over 100 repeats at q≈0.50)
-
-Notes on Quota Ranges and Densities
-- We use the same point density for all ranges; no “dense center” variant.
-- Standard sets: `0–1` (101 points), `0.05–0.25` (41 points), and `0.4–0.6` (41 points).
-- This replaces earlier `0.2–0.8` focus ranges with `0.05–0.25` per the updated spec.
-- Run: python FirstAgent.py (configure n, M, rp, q_ratios, and param_settings at the bottom of the file).
+Appendix: `main_all.py`
+- Single entry point that runs the combined curve, weights-variance, bars, and first-agent analyses for default `n` and a set of larger-`n` configurations, with uniform quota densities.
+- Console progress shows total plots completed and per-plot counters for draws and repeats.
+- Key knobs at the top of `__main__`:
+  - `default_n` (default 100), `M` (default 100), `rp` (default 10000)
+  - Quota sets: `full_0_1_101`, `focus_0p05_0p25_41`, `focus_0p4_0p6_41`
+  - Large-`n` configs mirroring the separate large-n script
