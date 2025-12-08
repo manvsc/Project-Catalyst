@@ -34,6 +34,13 @@ What `main_all.py` does and outputs
     - `plots/curves_default/alpha_*_first_agent_variance_boxplot.pdf`: boxplots of the variance estimator at representative quotas over `REPEATS` repeats.
     - `plots/curves_default/alpha_*_first_agent_w1norm_boxplot.pdf`: boxplot of the first agent’s normalized weight across the `M` draws.
 
+**CI/CD**
+- GitHub Actions workflow at `./.github/workflows/ci.yml`:
+  - Triggers on pushes to `main`/`master` and on PRs.
+  - Sets up Python 3.10, installs `numpy` and `matplotlib`.
+  - Runs a light lint via `flake8` (ignores E501) and a smoke import of `main_all` with `MPLBACKEND=Agg`.
+  - Extend as needed (tests, caching, pinned versions).
+
 Behavior note for extreme gamma fit
 - When using the real-data gamma fit `(shape=0.24, scale=330235)`, sampled weights are highly skewed. After normalization, a single agent can dominate, leading to quotas where no coalition pivot events occur. In such cases, the Banzhaf column is all zeros, and plots annotate “some quotas: no pivots”. Bars for those quotas may appear empty because the estimated mean/variance of `bn_i/w_i` is zero across all M draws.
 - Mitigations: increase `M` and `rp` for this parameter and/or focus on quota ranges where pivots are more likely (often near 0.4–0.6 of total weight). The code clamps x-axes to the provided `q_ratios` range so focused plots (e.g., 0.05–0.25) display correct x-limits.
