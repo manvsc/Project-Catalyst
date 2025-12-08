@@ -68,6 +68,19 @@ How it works (at a glance)
 - Reduce `M` and/or `rp` to speed up iteration while testing visual choices.
 - Re-enable more `(alpha, theta)` pairs once satisfied with the layout.
 
+Interpretation Guide
+- Mean curve (bn_i/w_i): Values near 1 mean normalized Banzhaf aligns with normalized weights at that quota. Above 1 → agents tend to have more relative power than their weight; below 1 → less.
+- Variance curve (bn_i/w_i): Peaks mark quotas where relative power is most dispersed across agents. Often higher near pivotal thresholds (around 0.5), reflecting sensitivity to coalition structure.
+- Weight variance (Var(w_norm)): Higher values indicate more unequal weights. When weight inequality is extreme, some quotas can have no pivot events (annotated as “some quotas: no pivots”), yielding zero bars or flat segments.
+- Bars vs. curves: Curves reveal trends across quotas with CIs; bars summarize per-quota values with CIs. Use curves for pattern discovery and bars for side‑by‑side comparison at specific grids.
+- Focused ranges: In `focus_0p05_0p25` and `focus_0p4_0p6`, x‑axes are clamped to the provided range to zoom into subtle or pivotal regions.
+- First‑agent diagnostics:
+  - Variance curve: Shows how unstable bn_1(q)/w_1 is across draws for each quota; peaks = high sensitivity for that agent.
+  - Multi‑quota boxplots: Distribution of the variance estimator over repeated experiments; wide boxes imply the estimator itself varies noticeably across independent runs.
+- Extreme real‑data Gamma (α=0.24, θ=330235):
+  - Expect very skewed weights; one agent may dominate.
+  - Some quotas yield no pivots; plots annotate this. Consider focusing on 0.4–0.6 and increasing M/rp for more stable estimates.
+
 Appendix: knobs and progress
 - Key knobs at the top of `main_all.py`:
   - `default_n` (default 100), `M` (default 20 by default in this repo), `rp` (default 10000)
