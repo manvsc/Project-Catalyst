@@ -52,13 +52,13 @@ Performance guidance
 - For previews, keep M and REPEATS modest (e.g., M≈20, REPEATS≈20) and optionally reduce rp; this accelerates iteration.
 - For final runs, increase M (e.g., 50–100+) and rp (e.g., 10k+) to tighten CI bands; REPEATS can remain modest unless you specifically need detailed violin diagnostics.
 
-**How It Works (at a glance)**
-- For each `(alpha, theta)` and quota grid:
+How it works (at a glance)
+- For each `(α, θ)` and quota grid:
   1) Sample weights: `W ~ Gamma(α, θ)`, normalize to `w_norm`.
-  2) Monte Carlo Banzhaf: sample `rp` coalitions, compute pivot probabilities for all players and quotas.
-  3) Normalize Banzhaf across players per quota; form ratios `bn_i/w_i`.
-  4) Aggregate across players and across `M` draws to get mean, variance, and 95% CI bands.
-  5) Save plots to the appropriate folder with descriptive filenames.
+  2) Estimate Banzhaf via `rp` random coalitions across all quotas.
+  3) Normalize across players per quota; compute ratios `bn_i/w_i`.
+  4) Aggregate over players and `M` draws to build means, variances, and 95% CIs.
+  5) Save plots under `plots/` with descriptive filenames.
 
 **Console Progress**
 - main_all.py prints global progress for each plot job, e.g., `[7/22] bars n=100 focus_0p4_0p6_41 a=0.5 t=0.5`.
@@ -68,10 +68,9 @@ Performance guidance
 - Reduce `M` and/or `rp` to speed up iteration while testing visual choices.
 - Re-enable more `(alpha, theta)` pairs once satisfied with the layout.
 
-Appendix: `main_all.py`
-- Single entry point that runs the combined curve, weights-variance, bars, and first-agent analyses for default `n` and a set of larger-`n` configurations, with uniform quota densities.
-- Console progress shows total plots completed and per-plot counters for draws and repeats.
-- Key knobs at the top of `__main__`:
-  - `default_n` (default 100), `M` (default 100), `rp` (default 10000)
+Appendix: knobs and progress
+- Key knobs at the top of `main_all.py`:
+  - `default_n` (default 100), `M` (default 20 by default in this repo), `rp` (default 10000)
   - Quota sets: `full_0_1_101`, `focus_0p05_0p25_41`, `focus_0p4_0p6_41`
-  - Large-`n` configs mirroring the separate large-n script
+  - Large-`n` configs: both n=500 and n=1000 across all three ranges
+- Console progress shows total plots completed and per-plot counters for draws and repeats.
