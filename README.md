@@ -62,7 +62,7 @@ How it works (at a glance)
 
 **Console Progress**
 - main_all.py prints global progress for each plot job, e.g., `[7/22] bars n=100 focus_0p4_0p6_41 a=0.5 t=0.5`.
-- Per-plot, it prints periodic counters while iterating over `M` draws (and 100 repeats for the first-agent violin).
+- Per-plot, it prints periodic counters while iterating over `M` draws (and 100 repeats for the first-agent).
 
 **Tips**
 - Reduce `M` and/or `rp` to speed up iteration while testing visual choices.
