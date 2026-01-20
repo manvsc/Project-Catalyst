@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy matplotlib
+          pip install numpy matplotlib pandas scipy
 
       - name: Lint (basic flake8 install)
         run: |
@@ -35,7 +35,6 @@ jobs:
           python - <<'PY'
           import os
           os.environ['MPLBACKEND'] = 'Agg'
-          import main_all  # ensure import works
-          print('Imported main_all successfully')
+          import main  # ensure import works
+          print('Imported main successfully')
           PY
-
