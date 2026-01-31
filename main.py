@@ -1,13 +1,41 @@
 import os
+import hashlib
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Variance axis scaling
+VARIANCE_YSCALE = "linear"  # "linear" or "log"
+VARIANCE_EPS = 1e-12
+VARIANCE_PAD_FRAC = 0.05
 
 # --- CORE UTILITIES ---
 
 def draw_weights_gamma(n, alpha, theta, rng):
     """Sample a length-n vector of agent weights from Gamma(α=alpha, θ=theta) using rng."""
     return rng.gamma(shape=alpha, scale=theta, size=n)
+
+def make_rng(master_seed, tag):
+    """Deterministic RNG from a master seed and a string tag."""
+    digest = hashlib.sha256(f"{master_seed}|{tag}".encode("utf-8")).digest()
+    seed_int = int.from_bytes(digest[:8], "big") % (2**63 - 1)
+    return np.random.default_rng(seed_int)
+
+
+def apply_variance_scale(ax, scale=None):
+    """Apply variance axis scaling and clamp to non-negative."""
+    scale = VARIANCE_YSCALE if scale is None else scale
+    if scale == "log":
+        ax.set_yscale("log")
+        y0, y1 = ax.get_ylim()
+        y1 = max(y1, VARIANCE_EPS * 10)
+        ax.set_ylim(bottom=VARIANCE_EPS, top=y1 * (1 + VARIANCE_PAD_FRAC))
+    else:
+        y0, y1 = ax.get_ylim()
+        y1 = max(y1, 0.0)
+        pad = VARIANCE_PAD_FRAC * (y1 if y1 > 0 else 1.0)
+        ax.set_ylim(bottom=-pad, top=y1 + pad)
+        ticks = [t for t in ax.get_yticks() if t >= 0]
+        ax.set_yticks(ticks)
 
 
 def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
@@ -44,318 +72,257 @@ def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
     return b
 
 
-# --- PLOTTING FUNCTIONS ---
+# --- SAMPLING HELPERS ---
 
-def run_combined_curve(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
-    """Combined curve plot over quotas showing:
-    - Left axis: Mean Power/Stake Ratio (Target = 1.0)
-    - Right axis: Variance of Power/Stake Ratio (Target = 0.0)
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
-    out_path = os.path.join(out_dir, f"{tag}_combined_curve.pdf")
-
+def sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng):
+    """Sample intergroup variance (across players) and first-agent ratios over M draws."""
     Q = len(q_ratios)
-    means_MQ = np.zeros((M, Q))
-    vars_MQ = np.zeros((M, Q))
+    intergroup_vars = np.zeros((M, Q))
+    first_agent_ratios = np.zeros((M, Q))
+    ddof_players = 1 if n > 1 else 0
 
     for m in range(M):
         if M >= 5 and (m == 0 or (m + 1) % max(1, M // 5) == 0 or m == M - 1):
-            print(f"    [run_combined_curve] draw {m + 1}/{M}")
-        W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
-        w_norm = W / np.sum(W)
-        b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
-
-        # Normalize Banzhaf scores so they sum to 1
-        col_sums = b_grid.sum(axis=0, keepdims=True)
-        bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
-
-        # Calculate Ratio: (Normalized Banzhaf) / (Normalized Stake)
-        ratios = bn_grid / w_norm[:, None]
-        means_MQ[m, :] = ratios.mean(axis=0)
-        vars_MQ[m, :] = ratios.var(axis=0)
-
-    # --- STATISTICS & CLIPPING FIX ---
-    mean_of_means = means_MQ.mean(axis=0)
-    se_means = means_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_mean = np.maximum(0, mean_of_means - 1.96 * se_means)
-    hi_mean = mean_of_means + 1.96 * se_means
-
-    mean_of_vars = vars_MQ.mean(axis=0)
-    se_vars = vars_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_var = np.maximum(0, mean_of_vars - 1.96 * se_vars)
-    hi_var = mean_of_vars + 1.96 * se_vars
-
-    # --- PLOTTING ---
-    fig, ax1 = plt.subplots(figsize=(8, 6))
-    ax2 = ax1.twinx()
-
-    ax1.plot(q_ratios, mean_of_means, color='blue', label='Mean Ratio')
-    ax1.fill_between(q_ratios, lo_mean, hi_mean, color='blue', alpha=0.2)
-    ax1.axhline(y=1, color='gray', linestyle='--', linewidth=1, label="Perfect Proportionality (1.0)")
-    ax1.set_ylabel("Mean Power/Stake Ratio\n(Closer to 1 is better)", color='blue', fontsize=10)
-    ax1.tick_params(axis='y', labelcolor='blue')
-
-    ax2.plot(q_ratios, mean_of_vars, color='red', linestyle='--', label='Variance of Ratio')
-    ax2.fill_between(q_ratios, lo_var, hi_var, color='red', alpha=0.2)
-    ax2.set_ylabel("Variance of Power/Stake Ratio\n(Lower is better)", color='red', fontsize=10)
-    ax2.tick_params(axis='y', labelcolor='red')
-
-    ax1.set_xlabel("Quota (Proportion of Total Stake)")
-    ax1.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
-    ax1.axvline(x=0.5, color='gray', linestyle=':', linewidth=1)
-
-    plt.title(
-        f"Fairness Analysis: Power vs. Stake\nGamma Dist (Shape $\\alpha$={alpha}, Scale $\\theta$={theta}, n={n})",
-        fontsize=12)
-    ax1.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
-
-
-def run_curve_with_wvar(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
-    """Two-panel figure:
-    - Top: Mean and Variance of Power/Stake Ratio (Corrected CIs)
-    - Bottom: Variance of the Weights themselves (control metric)
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
-    out_path = os.path.join(out_dir, f"{tag}_combined_curve_with_wvar.pdf")
-
-    Q = len(q_ratios)
-    means_MQ = np.zeros((M, Q))
-    vars_MQ = np.zeros((M, Q))
-    wvar_M = np.zeros(M)
-
-    for m in range(M):
-        if M >= 5 and (m == 0 or (m + 1) % max(1, M // 5) == 0 or m == M - 1):
-            print(f"    [run_curve_with_wvar] draw {m + 1}/{M}")
-        W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
-        w_norm = W / np.sum(W)
-        wvar_M[m] = np.var(w_norm)
-        b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
-        col_sums = b_grid.sum(axis=0, keepdims=True)
-        bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
-        ratios = bn_grid / w_norm[:, None]
-        means_MQ[m, :] = ratios.mean(axis=0)
-        vars_MQ[m, :] = ratios.var(axis=0)
-
-    mean_of_means = means_MQ.mean(axis=0)
-    se_means = means_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_mean = np.maximum(0, mean_of_means - 1.96 * se_means)
-    hi_mean = mean_of_means + 1.96 * se_means
-
-    mean_of_vars = vars_MQ.mean(axis=0)
-    se_vars = vars_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_var = np.maximum(0, mean_of_vars - 1.96 * se_vars)
-    hi_var = mean_of_vars + 1.96 * se_vars
-
-    wvar_mean = float(np.mean(wvar_M))
-    wvar_se = float(np.std(wvar_M, ddof=1) / np.sqrt(M)) if M > 1 else 0.0
-    wvar_ci_lo = max(0, wvar_mean - 1.96 * wvar_se)
-    wvar_ci_hi = wvar_mean + 1.96 * wvar_se
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-    ax1b = ax1.twinx()
-
-    ax1.plot(q_ratios, mean_of_means, color='blue', label="Mean Ratio")
-    ax1.fill_between(q_ratios, lo_mean, hi_mean, color='blue', alpha=0.2)
-    ax1.axhline(y=1, color='gray', linestyle='--', linewidth=1)
-    ax1.set_ylabel("Mean Power/Stake Ratio", color='blue')
-    ax1.tick_params(axis='y', labelcolor='blue')
-    ax1.grid(True, alpha=0.3)
-
-    ax1b.plot(q_ratios, mean_of_vars, color='red', linestyle='--', label="Var Ratio")
-    ax1b.fill_between(q_ratios, lo_var, hi_var, color='red', alpha=0.2)
-    ax1b.set_ylabel("Variance of Ratio", color='red')
-    ax1b.tick_params(axis='y', labelcolor='red')
-
-    ax1.set_xlabel("Quota")
-    ax1.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
-    ax1.axvline(x=0.5, color='gray', linestyle=':', linewidth=1)
-    ax1.set_title(f"Fairness Metrics vs. Quota (n={n})\nGamma Dist (Shape $\\alpha$={alpha}, Scale $\\theta$={theta})")
-
-    ax2.bar([0], [wvar_mean], width=0.6, color='purple', alpha=0.8)
-    ax2.errorbar([0], [wvar_mean], yerr=[[wvar_mean - wvar_ci_lo], [wvar_ci_hi - wvar_mean]],
-                 fmt='none', ecolor='black', capsize=3)
-    ax2.set_xticks([0])
-    ax2.set_xticklabels(["Var(Normalized Weights)"])
-    ax2.set_ylabel("Variance of Input Weights")
-    ax2.grid(True, axis='y', alpha=0.3)
-    ax2.set_title("Control Metric: Inequality of Stake Distribution")
-
-    plt.tight_layout()
-    plt.savefig(out_path)
-    plt.close()
-
-
-def run_bars(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
-    """Bar summary of mean and variance of bn_i/w_i across quotas with 95% CI bars."""
-    os.makedirs(out_dir, exist_ok=True)
-    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
-    out_path = os.path.join(out_dir, f"{tag}_combined_bars.pdf")
-
-    Q = len(q_ratios)
-    means_MQ = np.zeros((M, Q))
-    vars_MQ = np.zeros((M, Q))
-    for m in range(M):
-        if M >= 5 and (m == 0 or (m + 1) % max(1, M // 5) == 0 or m == M - 1):
-            print(f"    [run_bars] draw {m + 1}/{M}")
-        W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
+            print(f"    [sample] draw {m + 1}/{M}")
+        W = draw_weights_gamma(n, alpha, theta, rng)
         w_norm = W / np.sum(W)
         b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
         col_sums = b_grid.sum(axis=0, keepdims=True)
         bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
         ratios = bn_grid / w_norm[:, None]
-        means_MQ[m, :] = ratios.mean(axis=0)
-        vars_MQ[m, :] = ratios.var(axis=0)
+        intergroup_vars[m, :] = np.maximum(ratios.var(axis=0, ddof=ddof_players), 0.0)
+        first_agent_ratios[m, :] = ratios[0, :]
 
-    mean_of_means = means_MQ.mean(axis=0)
-    se_means = means_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_mean = np.maximum(0, mean_of_means - 1.96 * se_means)
-    hi_mean = mean_of_means + 1.96 * se_means
-
-    mean_of_vars = vars_MQ.mean(axis=0)
-    se_vars = vars_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros(Q)
-    lo_var = np.maximum(0, mean_of_vars - 1.96 * se_vars)
-    hi_var = mean_of_vars + 1.96 * se_vars
-
-    x = np.arange(Q)
-    width = 0.6
-    fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-
-    ax_top.bar(x, mean_of_means, width=width, color='steelblue', alpha=0.8)
-    ax_top.errorbar(x, mean_of_means, yerr=[mean_of_means - lo_mean, hi_mean - mean_of_means],
-                    fmt='none', ecolor='black', elinewidth=1, capsize=2)
-    ax_top.axhline(y=1, color='gray', linestyle='--', linewidth=1)
-    ax_top.set_ylabel("Mean Power/Stake Ratio\n(Target = 1.0)")
-    ax_top.grid(True, axis='y', alpha=0.3)
-    ax_top.set_title(f"Fairness Summary by Quota (n={n})\nGamma(Shape $\\alpha$={alpha}, Scale $\\theta$={theta})")
-
-    ax_bottom.bar(x, mean_of_vars, width=width, color='indianred', alpha=0.8)
-    ax_bottom.errorbar(x, mean_of_vars, yerr=[mean_of_vars - lo_var, hi_var - mean_of_vars],
-                       fmt='none', ecolor='black', elinewidth=1, capsize=2)
-    ax_bottom.set_ylabel("Variance of Power/Stake Ratio\n(Target = 0.0)")
-    ax_bottom.set_xlabel("Quota Index")
-    ax_bottom.grid(True, axis='y', alpha=0.3)
-
-    tick_idx = np.linspace(0, Q - 1, min(Q, 11), dtype=int)
-    ax_bottom.set_xticks(tick_idx)
-    ax_bottom.set_xticklabels([f"{q:.2f}" for q in q_ratios[tick_idx]])
-
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig(out_path)
-    plt.close()
+    return intergroup_vars, first_agent_ratios
 
 
-def run_first_agent(alpha, theta, n, M, rp, out_dir, rng, q_ratios, repr_qs=None, repeats=20):
-    """First-agent analysis:
-    - Curve: variance over draws of bn_1(q)/w_1 vs quota with CI
-    - Boxplot: distribution of variance estimates over repeats
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
-    curve_path = os.path.join(out_dir, f"{tag}_first_agent_variance_curve.pdf")
-    boxplot_path = os.path.join(out_dir, f"{tag}_first_agent_variance_boxplot.pdf")
-
+def sample_mean_and_intergroup(alpha, theta, n, M, rp, q_ratios, rng):
+    """Sample mean ratio (across players) and intergroup variance over M draws."""
     Q = len(q_ratios)
-    ratios_first_MQ = np.zeros((M, Q))
+    mean_ratios = np.zeros((M, Q))
+    intergroup_vars = np.zeros((M, Q))
+    ddof_players = 1 if n > 1 else 0
+
     for m in range(M):
         if M >= 5 and (m == 0 or (m + 1) % max(1, M // 5) == 0 or m == M - 1):
-            print(f"    [run_first_agent curve] draw {m + 1}/{M}")
-        W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
+            print(f"    [sample mean/var] draw {m + 1}/{M}")
+        W = draw_weights_gamma(n, alpha, theta, rng)
         w_norm = W / np.sum(W)
         b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
         col_sums = b_grid.sum(axis=0, keepdims=True)
         bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
-        ratios_first_MQ[m, :] = bn_grid[0, :] / w_norm[0]
+        ratios = bn_grid / w_norm[:, None]
+        mean_ratios[m, :] = ratios.mean(axis=0)
+        intergroup_vars[m, :] = np.maximum(ratios.var(axis=0, ddof=ddof_players), 0.0)
 
-    # Calculate Variance over draws (unbiased sample variance, ddof=1)
+    return mean_ratios, intergroup_vars
+
+
+def summarize_mean_ci(samples_MQ):
+    """Return mean and 95% CI of samples (shape M x Q)."""
+    M = samples_MQ.shape[0]
+    mean = samples_MQ.mean(axis=0)
+    se = samples_MQ.std(axis=0, ddof=1) / np.sqrt(M) if M > 1 else np.zeros_like(mean)
+    lo = np.maximum(0, mean - 1.96 * se)
+    hi = mean + 1.96 * se
+    return mean, lo, hi
+
+
+def summarize_variance_ci(samples_MQ):
+    """Return variance across draws and an approximate 95% CI (normal approx)."""
+    M = samples_MQ.shape[0]
     if M > 1:
-        s2 = ratios_first_MQ.var(axis=0, ddof=1)
-        # ADJUSTED "variance of variance": exact under normality
+        s2 = samples_MQ.var(axis=0, ddof=1)
         se_s2 = s2 * np.sqrt(2.0 / (M - 1))
     else:
-        s2 = np.zeros(Q)
-        se_s2 = np.zeros(Q)
-
-    # Clip lower bound (kept as in your code)
+        s2 = np.zeros(samples_MQ.shape[1])
+        se_s2 = np.zeros_like(s2)
     lo = np.maximum(0, s2 - 1.96 * se_s2)
     hi = s2 + 1.96 * se_s2
+    return s2, lo, hi
 
-    # Plot Variance Curve
-    plt.figure()
-    plt.plot(q_ratios, s2, color='purple', label='Var over draws (Agent 1)')
-    plt.fill_between(q_ratios, lo, hi, color='purple', alpha=0.2)
+
+def format_param_label(alpha, theta, fitted_alpha, fitted_theta):
+    """Short legend labels around fitted parameters."""
+    tol = 1e-12
+    if np.isclose(alpha, 0.5, atol=tol, rtol=0) and np.isclose(theta, 0.5, atol=tol, rtol=0):
+        return r"$\alpha=0.5,\ \theta=0.5$"
+    if np.isclose(alpha, fitted_alpha, atol=tol, rtol=0) and np.isclose(theta, fitted_theta, atol=tol, rtol=0):
+        return r"$\alpha=\alpha_{\mathrm{fit}},\ \theta=\theta_{\mathrm{fit}}$"
+    if np.isclose(alpha, fitted_alpha, atol=tol, rtol=0) and np.isclose(theta, fitted_theta * 0.5, atol=tol, rtol=0):
+        return r"$\alpha=\alpha_{\mathrm{fit}},\ \theta=0.5\,\theta_{\mathrm{fit}}$"
+    if np.isclose(alpha, fitted_alpha, atol=tol, rtol=0) and np.isclose(theta, fitted_theta * 2.0, atol=tol, rtol=0):
+        return r"$\alpha=\alpha_{\mathrm{fit}},\ \theta=2\,\theta_{\mathrm{fit}}$"
+    if np.isclose(theta, fitted_theta, atol=tol, rtol=0) and np.isclose(alpha, fitted_alpha * 0.5, atol=tol, rtol=0):
+        return r"$\alpha=0.5\,\alpha_{\mathrm{fit}},\ \theta=\theta_{\mathrm{fit}}$"
+    if np.isclose(theta, fitted_theta, atol=tol, rtol=0) and np.isclose(alpha, fitted_alpha * 2.0, atol=tol, rtol=0):
+        return r"$\alpha=2\,\alpha_{\mathrm{fit}},\ \theta=\theta_{\mathrm{fit}}$"
+    return rf"$\alpha={alpha:g},\ \theta={theta:g}$"
+
+
+# --- PLOTTING FUNCTIONS ---
+
+
+def run_intergroup_variance_curve(alpha, theta, n, M, rp, out_dir, rng, q_ratios):
+    """Intergroup variance (across players) vs quota with 95% CI."""
+    os.makedirs(out_dir, exist_ok=True)
+    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
+    out_path = os.path.join(out_dir, f"{tag}_intergroup_variance_curve_n{n}.pdf")
+
+    intergroup_vars, _ = sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng)
+    mean_var, lo, hi = summarize_mean_ci(intergroup_vars)
+
+    plt.figure(figsize=(8, 5.5))
+    plt.plot(q_ratios, mean_var, color='darkred', label='Mean Intergroup Variance')
+    plt.fill_between(q_ratios, lo, hi, color='lightcoral', alpha=0.3)
     plt.xlabel('Quota')
+    plt.ylabel('Intergroup Variance of Ratio')
+    plt.title(f"Intergroup Variance vs Quota (n={n})\nGamma(α={alpha}, θ={theta})")
     plt.xlim(float(q_ratios.min()), float(q_ratios.max()))
-    plt.ylabel('Variance of Ratio (Agent 1)')
-    plt.title(f"Stability Analysis: Agent 1 Ratio Variance\nGamma(α={alpha}, θ={theta})")
-    plt.axvline(x=0.5, color='gray', linestyle='--', linewidth=1)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(curve_path)
+    plt.savefig(out_path)
     plt.close()
 
-    # Boxplots for Representative Quotas
-    if repr_qs is None:
-        repr_qs = [0.10, 0.20, 0.40, 0.50, 0.60]
-    q_indices, q_labels = [], []
-    for q in repr_qs:
-        idx = int(np.argmin(np.abs(q_ratios - q)))
-        if (len(q_indices) == 0) or (idx != q_indices[-1]):
-            q_indices.append(idx)
-            q_labels.append(f"q={q_ratios[idx]:.2f}")
 
-    var_samples_list = []
-    for q_idx in q_indices:
-        var_samples = np.zeros(repeats)
-        for r in range(repeats):
-            if repeats >= 5 and (r == 0 or (r + 1) % max(1, repeats // 5) == 0 or r == repeats - 1):
-                print(f"    [run_first_agent repeats q={q_ratios[q_idx]:.2f}] repeat {r + 1}/{repeats}")
-            vals = np.zeros(M)
-            for m in range(M):
-                W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
-                w_norm = W / np.sum(W)
-                b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
-                col_sums = b_grid.sum(axis=0, keepdims=True)
-                bn_grid = np.divide(b_grid, col_sums, out=np.zeros_like(b_grid), where=col_sums != 0)
-                vals[m] = bn_grid[0, q_idx] / w_norm[0]
-            var_samples[r] = np.var(vals, ddof=1) if M > 1 else 0.0
-        var_samples_list.append(var_samples)
+def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, master_seed, q_ratios):
+    """First-agent mean/variance curves for multiple user counts (one figure)."""
+    os.makedirs(out_dir, exist_ok=True)
+    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
+    out_path = os.path.join(out_dir, f"{tag}_first_agent_mean_and_variance_multi_n.pdf")
 
-    plt.figure(figsize=(max(6, 1.8 * len(q_indices) + 2), 5))
-    plt.boxplot(var_samples_list, widths=0.5, positions=np.arange(1, len(q_indices) + 1), vert=True,
-                patch_artist=True, boxprops=dict(facecolor='lightsteelblue', alpha=0.7))
-    plt.ylabel('Variance of Ratio (Agent 1)')
-    plt.xticks(np.arange(1, len(q_indices) + 1), q_labels)
-    plt.title(f"Variance Stability Check: Agent 1\n(Across {repeats} experiment repeats)")
-    plt.grid(True, axis='y', alpha=0.3)
+    base_tag = f"first_agent_var_multi_n|alpha={alpha}|theta={theta}"
+    fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+    for n in n_list:
+        rng = make_rng(master_seed, base_tag)
+        _, first_agent_ratios = sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng)
+        mean_ratio, _, _ = summarize_mean_ci(first_agent_ratios)
+        s2, _, _ = summarize_variance_ci(first_agent_ratios)
+        ax_mean.plot(q_ratios, mean_ratio, label=f"n={n}")
+        ax_var.plot(q_ratios, s2, label=f"n={n}")
+
+    ax_mean.set_ylabel("Mean Power/Stake Ratio (Agent 1)")
+    ax_mean.set_title(f"Agent 1 Mean Ratio vs Quota\nGamma(α={alpha}, θ={theta})")
+    ax_mean.grid(True, alpha=0.3)
+    ax_mean.legend()
+
+    ax_var.set_xlabel('Quota')
+    ax_var.set_ylabel('Variance of Ratio (Agent 1)')
+    ax_var.set_title("Agent 1 Ratio Variance vs Quota")
+    ax_var.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
+    apply_variance_scale(ax_var)
+    ax_var.grid(True, alpha=0.3)
+    ax_var.legend()
     plt.tight_layout()
-    plt.savefig(boxplot_path)
+    plt.savefig(out_path)
     plt.close()
 
-    # Weight Distribution Boxplot (Single Agent)
-    w1_values = []
-    for m in range(M):
-        W = draw_weights_gamma(n, alpha, theta, rng)  # <-- reproducible
-        w_norm = W / np.sum(W)
-        w1_values.append(w_norm[0])
 
-    plt.figure(figsize=(6.5, 5.2))
-    plt.boxplot([w1_values], widths=0.5, vert=True, patch_artist=True,
-                boxprops=dict(facecolor='#c2e0ff', alpha=0.8))
-    plt.xticks([1], ["Agent 1 Normalized Weight"], rotation=0, ha='center')
-    plt.ylabel('Weight (Proportion of Total)')
-    plt.title(f"Agent 1 Weight Distribution (Gamma α={alpha}, θ={theta})")
-    plt.grid(True, axis='y', alpha=0.3)
-    try:
-        plt.gcf().set_constrained_layout(True)
-    except Exception:
-        plt.tight_layout(rect=[0.06, 0.06, 0.98, 0.95])
-    extra_path = os.path.join(out_dir, f"{tag}_first_agent_w1norm_boxplot.pdf")
-    plt.savefig(extra_path)
+def run_intergroup_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, master_seed, q_ratios):
+    """Intergroup mean/variance curves for multiple user counts (one figure)."""
+    os.makedirs(out_dir, exist_ok=True)
+    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
+    out_path = os.path.join(out_dir, f"{tag}_mean_and_variance_multi_n.pdf")
+
+    base_tag = f"multi_n|alpha={alpha}|theta={theta}"
+    fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+    for n in n_list:
+        rng = make_rng(master_seed, base_tag)
+        mean_ratios, intergroup_vars = sample_mean_and_intergroup(alpha, theta, n, M, rp, q_ratios, rng)
+        mean_of_means, _, _ = summarize_mean_ci(mean_ratios)
+        mean_of_vars, _, _ = summarize_mean_ci(intergroup_vars)
+        mean_of_vars = np.maximum(mean_of_vars, VARIANCE_EPS)
+        ax_mean.plot(q_ratios, mean_of_means, label=f"n={n}")
+        ax_var.plot(q_ratios, mean_of_vars, label=f"n={n}")
+
+    ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
+    ax_mean.set_ylabel("Mean Power/Stake Ratio")
+    ax_mean.set_title(f"Mean Ratio vs Quota\nGamma(α={alpha}, θ={theta})")
+    ax_mean.grid(True, alpha=0.3)
+    ax_mean.legend()
+
+    ax_var.set_xlabel('Quota')
+    ax_var.set_ylabel('Intergroup Variance of Ratio')
+    ax_var.set_title("Intergroup Variance vs Quota")
+    ax_var.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
+    apply_variance_scale(ax_var, scale="log")
+    ax_var.grid(True, alpha=0.3)
+    ax_var.legend()
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def run_intergroup_variance_boxplot_fixed_quota(alpha, theta, n_list, M, rp, out_dir, master_seed, q_ratio_fixed):
+    """Boxplots of intergroup mean/variance across draws for different n at a fixed quota."""
+    os.makedirs(out_dir, exist_ok=True)
+    tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
+    out_path = os.path.join(out_dir, f"{tag}_intergroup_mean_and_variance_boxplot_q{q_ratio_fixed:.3f}.pdf")
+
+    q_ratios = np.array([q_ratio_fixed])
+    base_tag = f"boxplot_fixed_q|alpha={alpha}|theta={theta}|q={q_ratio_fixed}"
+    labels = []
+    mean_data = []
+    var_data = []
+    for n in n_list:
+        rng = make_rng(master_seed, base_tag)
+        mean_ratios, intergroup_vars = sample_mean_and_intergroup(alpha, theta, n, M, rp, q_ratios, rng)
+        mean_data.append(mean_ratios[:, 0])
+        var_data.append(np.maximum(intergroup_vars[:, 0], VARIANCE_EPS))
+        labels.append(f"n={n}")
+
+    fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(max(7, 1.5 * len(n_list) + 3), 8), sharex=True)
+    ax_mean.boxplot(mean_data, widths=0.6, patch_artist=True,
+                    boxprops=dict(facecolor='lightsteelblue', alpha=0.7))
+    ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
+    ax_mean.set_ylabel('Mean Power/Stake Ratio')
+    ax_mean.set_title(f"Mean Ratio at Fixed Quota q={q_ratio_fixed:.3f}")
+    ax_mean.grid(True, axis='y', alpha=0.3)
+
+    ax_var.boxplot(var_data, widths=0.6, patch_artist=True,
+                   boxprops=dict(facecolor='lightcoral', alpha=0.7))
+    ax_var.set_xticks(np.arange(1, len(labels) + 1))
+    ax_var.set_xticklabels(labels)
+    ax_var.set_ylabel('Intergroup Variance of Ratio')
+    ax_var.set_title("Intergroup Variance at Fixed Quota")
+    apply_variance_scale(ax_var, scale="log")
+    ax_var.grid(True, axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+
+
+def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, master_seed, q_ratios, fitted_alpha, fitted_theta):
+    """Intergroup mean/variance curves for multiple gamma parameter sets."""
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"mean_and_variance_multi_params_n{n}.pdf")
+
+    base_tag = f"multi_params|n={n}"
+    fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+    for (alpha, theta) in param_settings:
+        rng = make_rng(master_seed, base_tag)
+        mean_ratios, intergroup_vars = sample_mean_and_intergroup(alpha, theta, n, M, rp, q_ratios, rng)
+        mean_of_means, _, _ = summarize_mean_ci(mean_ratios)
+        mean_of_vars, _, _ = summarize_mean_ci(intergroup_vars)
+        label = format_param_label(alpha, theta, fitted_alpha, fitted_theta)
+        ax_mean.plot(q_ratios, mean_of_means, label=label)
+        ax_var.plot(q_ratios, mean_of_vars, label=label)
+
+    ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
+    ax_mean.set_ylabel("Mean Power/Stake Ratio")
+    ax_mean.set_title(f"Mean Ratio vs Quota (n={n})\nMultiple Gamma Parameters")
+    ax_mean.grid(True, alpha=0.3)
+    ax_mean.legend(fontsize=8)
+
+    ax_var.set_xlabel('Quota')
+    ax_var.set_ylabel('Intergroup Variance of Ratio')
+    ax_var.set_title("Intergroup Variance vs Quota")
+    ax_var.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
+    apply_variance_scale(ax_var)
+    ax_var.grid(True, alpha=0.3)
+    ax_var.legend(fontsize=8)
+    plt.tight_layout()
+    plt.savefig(out_path)
     plt.close()
 
 
@@ -368,15 +335,9 @@ if __name__ == "__main__":
     rp = 10000
 
     # Output Directories
-    plots_dir = os.path.join("plots2", "curves_default")
-    plots_weights_var_root = os.path.join("plots2", "weights_var")
-    plots_bars_root = os.path.join("plots2", "bars")
-    plots_large_n_root = os.path.join("plots2", "large_n")
+    plots_intergroup_root = os.path.join("plots2", "intergroup_variance")
 
-    os.makedirs(plots_dir, exist_ok=True)
-    os.makedirs(plots_weights_var_root, exist_ok=True)
-    os.makedirs(plots_bars_root, exist_ok=True)
-    os.makedirs(plots_large_n_root, exist_ok=True)
+    os.makedirs(plots_intergroup_root, exist_ok=True)
 
     # Quota sets
     quota_sets = {
@@ -385,85 +346,56 @@ if __name__ == "__main__":
         'focus_0p4_0p6_41': np.linspace(0.4, 0.6, 41),
     }
 
-    # Larger-n configurations
-    large_n_configs = [
-        {'name': 'n500_full_0_1_21', 'n': 500, 'M': 20, 'rp': 6000, 'q_ratios': np.linspace(0, 1, 21)},
-        {'name': 'n500_focus_0p05_0p25_21', 'n': 500, 'M': 20, 'rp': 6000, 'q_ratios': np.linspace(0.05, 0.25, 21)},
-        {'name': 'n500_focus_0p4_0p6_31', 'n': 500, 'M': 20, 'rp': 8000, 'q_ratios': np.linspace(0.4, 0.6, 31)},
-        {'name': 'n1000_full_0_1_21', 'n': 1000, 'M': 20, 'rp': 6000, 'q_ratios': np.linspace(0, 1, 21)},
-        {'name': 'n1000_focus_0p05_0p25_21', 'n': 1000, 'M': 20, 'rp': 6000, 'q_ratios': np.linspace(0.05, 0.25, 21)},
-        {'name': 'n1000_focus_0p4_0p6_31', 'n': 1000, 'M': 20, 'rp': 8000, 'q_ratios': np.linspace(0.4, 0.6, 31)},
-    ]
-
     # Parameters: (alpha, theta)
+    fitted_alpha = 0.273568
+    fitted_theta = 1301506.236646
+    theta_lo = fitted_theta * 0.5
+    theta_hi = fitted_theta * 2.0
+    alpha_lo = fitted_alpha * 0.5
+    alpha_hi = fitted_alpha * 2.0
     param_settings = [
-        (0.24, 330235.0),  # Real data fit
-        (0.5, 0.5), (0.5, 1.0), (0.5, 2.0),
-        (1.0, 0.5), (1.0, 1.0)
+        (0.5, 0.5),
+        (fitted_alpha, fitted_theta),  # data2.csv fit (fitting2.py)
+        (fitted_alpha, theta_lo),
+        (fitted_alpha, theta_hi),
+        (alpha_lo, fitted_theta),
+        (alpha_hi, fitted_theta),
     ]
 
-    # First-agent knobs
-    REPR_QS = [0.10, 0.20, 0.50, 0.60]
-    REPEATS = 20
+    # Intergroup variance configs
+    intergroup_n_list = [50, 100, 500, 1000]
+    intergroup_q_ratios = quota_sets['full_0_1_101']
+    intergroup_q_fixed = 0.07
 
     # Reproducible master seed (all randomness derives from this)
-    master_rng = np.random.default_rng(42)
+    master_seed = 42
 
     # Progress tracking
-    num_params = len(param_settings)
-    jobs_per_param = 1 + 6 + 1 + 3 * len(large_n_configs)
-    total_jobs = num_params * jobs_per_param
+    total_jobs = 4
     job_idx = 0
 
     print(f"Starting Simulation with {total_jobs} total tasks...")
 
-    for (idx_param, (alpha, theta)) in enumerate(param_settings, start=1):
-        print(f"=== Param Set {idx_param}/{num_params}: alpha={alpha}, theta={theta} ===")
+    # Intergroup variance focused outputs (fitted params)
+    alpha, theta = fitted_alpha, fitted_theta
 
-        # Each param set gets a deterministic child seed from master_rng
-        rng = np.random.default_rng(int(master_rng.integers(0, 2**63 - 1)))
+    job_idx += 1
+    print(f"[{job_idx}/{total_jobs}] First Agent Variance Multi-n")
+    run_first_agent_variance_multi_n(alpha, theta, intergroup_n_list, M, rp, plots_intergroup_root, master_seed, intergroup_q_ratios)
 
-        # 1) Combined curve (Default n)
-        job_idx += 1
-        print(f"[{job_idx}/{total_jobs}] Combined Curve (n={default_n})")
-        run_combined_curve(alpha, theta, default_n, M, rp, plots_dir, rng, quota_sets['full_0_1_101'])
+    job_idx += 1
+    print(f"[{job_idx}/{total_jobs}] Intergroup Mean+Variance Multi-n")
+    run_intergroup_variance_multi_n(alpha, theta, intergroup_n_list, M, rp, plots_intergroup_root, master_seed, intergroup_q_ratios)
 
-        # 2) Extended variants (Weights Var & Bars)
-        for qname, q_ratios in quota_sets.items():
-            out_weights_var = os.path.join(plots_weights_var_root, qname)
-            out_bars = os.path.join(plots_bars_root, qname)
-            os.makedirs(out_weights_var, exist_ok=True)
-            os.makedirs(out_bars, exist_ok=True)
+    job_idx += 1
+    print(f"[{job_idx}/{total_jobs}] Intergroup Variance Boxplots (q={intergroup_q_fixed})")
+    run_intergroup_variance_boxplot_fixed_quota(alpha, theta, intergroup_n_list, M, rp, plots_intergroup_root, master_seed, intergroup_q_fixed)
 
-            job_idx += 1
-            print(f"[{job_idx}/{total_jobs}] Weights Var Plot (n={default_n}, {qname})")
-            run_curve_with_wvar(alpha, theta, default_n, M, rp, out_weights_var, rng, q_ratios)
+    job_idx += 1
+    print(f"[{job_idx}/{total_jobs}] Intergroup Mean+Variance Multi-params (n={default_n})")
+    run_intergroup_variance_multi_params(
+        param_settings, default_n, M, rp, plots_intergroup_root, master_seed,
+        intergroup_q_ratios, fitted_alpha, fitted_theta
+    )
 
-            job_idx += 1
-            print(f"[{job_idx}/{total_jobs}] Bar Summary (n={default_n}, {qname})")
-            run_bars(alpha, theta, default_n, M, rp, out_bars, rng, q_ratios)
-
-        # 3) Large-n variants
-        for cfg in large_n_configs:
-            out_dir = os.path.join(plots_large_n_root, cfg['name'])
-            os.makedirs(out_dir, exist_ok=True)
-
-            job_idx += 1
-            print(f"[{job_idx}/{total_jobs}] Large-n Combined ({cfg['name']})")
-            run_combined_curve(alpha, theta, cfg['n'], cfg['M'], cfg['rp'], out_dir, rng, cfg['q_ratios'])
-
-            job_idx += 1
-            print(f"[{job_idx}/{total_jobs}] Large-n Weights Var ({cfg['name']})")
-            run_curve_with_wvar(alpha, theta, cfg['n'], cfg['M'], cfg['rp'], out_dir, rng, cfg['q_ratios'])
-
-            job_idx += 1
-            print(f"[{job_idx}/{total_jobs}] Large-n Bars ({cfg['name']})")
-            run_bars(alpha, theta, cfg['n'], cfg['M'], cfg['rp'], out_dir, rng, cfg['q_ratios'])
-
-        # 4) First agent analysis
-        job_idx += 1
-        print(f"[{job_idx}/{total_jobs}] First Agent Analysis (n={default_n})")
-        run_first_agent(alpha, theta, default_n, M, rp, plots_dir, rng, quota_sets['full_0_1_101'],
-                        repr_qs=REPR_QS, repeats=REPEATS)
-
-    print("Done. All plots generated in 'plots/' directory.")
+    print("Done. All plots generated in 'plots2/' directory.")
