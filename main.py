@@ -332,7 +332,7 @@ if __name__ == "__main__":
     # Base configuration
     default_n = 100
     M = 20
-    rp = 10000
+    rp = 100000
 
     # Output Directories
     plots_intergroup_root = os.path.join("plots2", "intergroup_variance")
