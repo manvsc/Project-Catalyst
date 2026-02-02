@@ -198,6 +198,7 @@ def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, maste
         _, first_agent_ratios = sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng)
         mean_ratio, _, _ = summarize_mean_ci(first_agent_ratios)
         s2, _, _ = summarize_variance_ci(first_agent_ratios)
+        s2 = np.maximum(s2, VARIANCE_EPS)
         ax_mean.plot(q_ratios, mean_ratio, label=f"n={n}")
         ax_var.plot(q_ratios, s2, label=f"n={n}")
 
@@ -210,7 +211,7 @@ def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, maste
     ax_var.set_ylabel('Variance of Ratio (Agent 1)')
     ax_var.set_title("Agent 1 Ratio Variance vs Quota")
     ax_var.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
-    apply_variance_scale(ax_var)
+    apply_variance_scale(ax_var, scale="log")
     ax_var.grid(True, alpha=0.3)
     ax_var.legend()
     plt.tight_layout()
@@ -318,7 +319,7 @@ def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, mast
     ax_var.set_ylabel('Intergroup Variance of Ratio')
     ax_var.set_title("Intergroup Variance vs Quota")
     ax_var.set_xlim(float(q_ratios.min()), float(q_ratios.max()))
-    apply_variance_scale(ax_var)
+    apply_variance_scale(ax_var, scale="log")
     ax_var.grid(True, alpha=0.3)
     ax_var.legend(fontsize=8)
     plt.tight_layout()
@@ -332,7 +333,7 @@ if __name__ == "__main__":
     # Base configuration
     default_n = 100
     M = 20
-    rp = 100000
+    rp = 10000
 
     # Output Directories
     plots_intergroup_root = os.path.join("plots2", "intergroup_variance")
