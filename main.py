@@ -332,8 +332,8 @@ def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, mast
 if __name__ == "__main__":
     # Base configuration
     default_n = 100
-    M = 20
-    rp = 10000
+    M = 50
+    rp = 15000
 
     # Output Directories
     plots_intergroup_root = os.path.join("plots2", "intergroup_variance")
@@ -357,19 +357,19 @@ if __name__ == "__main__":
     param_settings = [
         (0.5, 0.5),
         (fitted_alpha, fitted_theta),  # data2.csv fit (fitting2.py)
-        (fitted_alpha, theta_lo),
-        (fitted_alpha, theta_hi),
+        #(fitted_alpha, theta_lo),
+        #(fitted_alpha, theta_hi),
         (alpha_lo, fitted_theta),
         (alpha_hi, fitted_theta),
     ]
 
     # Intergroup variance configs
-    intergroup_n_list = [50, 100, 500, 1000]
+    intergroup_n_list = [20, 40, 60, 80]
     intergroup_q_ratios = quota_sets['full_0_1_101']
     intergroup_q_fixed = 0.07
 
     # Reproducible master seed (all randomness derives from this)
-    master_seed = 42
+    master_seed = 41
 
     # Progress tracking
     total_jobs = 4
