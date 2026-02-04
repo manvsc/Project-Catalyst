@@ -38,6 +38,11 @@ def apply_variance_scale(ax, scale=None):
         ax.set_yticks(ticks)
 
 
+def apply_mean_scale(ax):
+    """Apply log scale to mean ratio axes."""
+    ax.set_yscale("log")
+
+
 def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
     """Estimate Banzhaf pivot probabilities for all players across a quota grid.
 
@@ -204,6 +209,7 @@ def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, maste
 
     ax_mean.set_ylabel("Mean Power/Stake Ratio (Agent 1)")
     ax_mean.set_title(f"Agent 1 Mean Ratio vs Quota\nGamma(α={alpha}, θ={theta})")
+    apply_mean_scale(ax_mean)
     ax_mean.grid(True, alpha=0.3)
     ax_mean.legend()
 
@@ -239,6 +245,7 @@ def run_intergroup_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, master
     ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
     ax_mean.set_ylabel("Mean Power/Stake Ratio")
     ax_mean.set_title(f"Mean Ratio vs Quota\nGamma(α={alpha}, θ={theta})")
+    apply_mean_scale(ax_mean)
     ax_mean.grid(True, alpha=0.3)
     ax_mean.legend()
 
@@ -278,6 +285,7 @@ def run_intergroup_variance_boxplot_fixed_quota(alpha, theta, n_list, M, rp, out
     ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
     ax_mean.set_ylabel('Mean Power/Stake Ratio')
     ax_mean.set_title(f"Mean Ratio at Fixed Quota q={q_ratio_fixed:.3f}")
+    apply_mean_scale(ax_mean)
     ax_mean.grid(True, axis='y', alpha=0.3)
 
     ax_var.boxplot(var_data, widths=0.6, patch_artist=True,
@@ -312,6 +320,7 @@ def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, mast
     ax_mean.axhline(y=1, color='gray', linestyle='--', linewidth=1)
     ax_mean.set_ylabel("Mean Power/Stake Ratio")
     ax_mean.set_title(f"Mean Ratio vs Quota (n={n})\nMultiple Gamma Parameters")
+    apply_mean_scale(ax_mean)
     ax_mean.grid(True, alpha=0.3)
     ax_mean.legend(fontsize=8)
 
@@ -332,7 +341,7 @@ def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, mast
 if __name__ == "__main__":
     # Base configuration
     default_n = 50
-    M = 30
+    M = 100
     rp = 15000
 
     # Output Directories
@@ -364,12 +373,12 @@ if __name__ == "__main__":
     ]
 
     # Intergroup variance configs
-    intergroup_n_list = [20, 40, 60, 80]
+    intergroup_n_list = [30, 40, 60, 80]
     intergroup_q_ratios = quota_sets['full_0_1_101']
     intergroup_q_fixed = 0.07
 
     # Reproducible master seed (all randomness derives from this)
-    master_seed = 42
+    master_seed = 43
 
     # Progress tracking
     total_jobs = 4

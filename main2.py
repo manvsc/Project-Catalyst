@@ -72,6 +72,53 @@ def mc_banzhaf_all_quota_vectorized(W, rp, q_ratios, rng=None):
     return b
 
 
+# --- EXACT BANZHAF (FIRST AGENT ONLY) ---
+
+def exact_banzhaf_first_agent_subset(W, q):
+    """Exact pivot probability for agent 1 via subset enumeration (float weights)."""
+    w1 = W[0]
+    others = W[1:]
+    sums = np.array([0.0])
+    for w in others:
+        sums = np.concatenate([sums, sums + w])
+    pivots = (sums < q) & (sums + w1 >= q)
+    return pivots.mean()
+
+
+def exact_banzhaf_first_agent_dp_int(weights_int, quota_int):
+    """Exact pivot probability for agent 1 using DP (integer weights)."""
+    if quota_int <= 0:
+        return 0.0
+    total = int(np.sum(weights_int))
+    if quota_int > total:
+        return 0.0
+    max_order = total
+    polynomial = [1] + [0] * max_order
+    current_order = 0
+    aux_polynomial = polynomial[:]
+    for w in weights_int:
+        current_order += w
+        offset = [0] * w + polynomial
+        for j in range(current_order + 1):
+            aux_polynomial[j] = polynomial[j] + offset[j]
+        polynomial = aux_polynomial[:]
+
+    w1 = int(weights_int[0])
+    swings = [0] * quota_int
+    for j in range(quota_int):
+        if j < w1:
+            swings[j] = polynomial[j]
+        else:
+            swings[j] = polynomial[j] - swings[j - w1]
+    b1 = 0
+    for k in range(w1):
+        idx = quota_int - 1 - k
+        if idx >= 0:
+            b1 += swings[idx]
+    total_coalitions = 2 ** (len(weights_int) - 1)
+    return b1 / float(total_coalitions)
+
+
 # --- SAMPLING HELPERS ---
 
 def sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng):
@@ -185,7 +232,10 @@ def run_intergroup_variance_curve(alpha, theta, n, M, rp, out_dir, rng, q_ratios
     plt.close()
 
 
-def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, master_seed, q_ratios):
+def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, master_seed, q_ratios,
+                                     use_exact=False, exact_max_n=24, exact_method="subset",
+                                     dp_weight_scale=10000, dp_max_total=200000,
+                                     dp_mode="normalized", dp_allow_rescale=True):
     """First-agent mean/variance curves for multiple user counts (one figure)."""
     os.makedirs(out_dir, exist_ok=True)
     tag = f"alpha_{str(alpha).replace('.', 'p')}_theta_{str(theta).replace('.', 'p')}"
@@ -195,7 +245,59 @@ def run_first_agent_variance_multi_n(alpha, theta, n_list, M, rp, out_dir, maste
     fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
     for n in n_list:
         rng = make_rng(master_seed, base_tag)
-        _, first_agent_ratios = sample_intergroup_and_first_agent(alpha, theta, n, M, rp, q_ratios, rng)
+        use_exact_local = use_exact
+        if use_exact and exact_method == "subset" and (n - 1) > exact_max_n:
+            use_exact_local = False
+            print(f"    [first agent] n={n} too large for subset exact (max {exact_max_n + 1}); using MC")
+        first_agent_ratios = np.zeros((M, len(q_ratios)))
+        for m in range(M):
+            if M >= 5 and (m == 0 or (m + 1) % max(1, M // 5) == 0 or m == M - 1):
+                print(f"    [first agent] n={n} draw {m + 1}/{M}")
+            W = draw_weights_gamma(n, alpha, theta, rng)
+            w_norm = W / np.sum(W)
+            total = np.sum(W)
+            quotas = q_ratios * total
+
+            b_grid = mc_banzhaf_all_quota_vectorized(W, rp=rp, q_ratios=q_ratios, rng=rng)
+            col_sums = b_grid.sum(axis=0)
+
+            if use_exact_local:
+                if exact_method == "dp_int":
+                    if dp_mode == "raw":
+                        # Truncate raw weights after decimal (e.g., 521467.617 -> 521467)
+                        weights_base = np.maximum(1, np.floor(W)).astype(int)
+                    else:
+                        # Truncate normalized weights after scaling
+                        weights_base = np.maximum(1, np.floor(w_norm * dp_weight_scale)).astype(int)
+
+                    total_int = int(weights_base.sum())
+                    if total_int > dp_max_total:
+                        if dp_allow_rescale:
+                            factor = int(np.ceil(total_int / dp_max_total))
+                            weights_int = np.maximum(1, (weights_base // factor)).astype(int)
+                            total_int = int(weights_int.sum())
+                            print(f"    [first agent] total_int too large; rescaled by {factor} to {total_int}")
+                        else:
+                            print(f"    [first agent] total_int={total_int} too large; using MC")
+                            bn1_norm = np.divide(b_grid[0, :], col_sums, out=np.zeros_like(col_sums), where=col_sums != 0)
+                            first_agent_ratios[m, :] = bn1_norm / w_norm[0]
+                            continue
+                    else:
+                        weights_int = weights_base
+
+                    quotas_int = np.floor(q_ratios * total_int).astype(int)
+                    b1_exact = np.array([exact_banzhaf_first_agent_dp_int(weights_int, q) for q in quotas_int])
+                    col_sums_adj = col_sums - b_grid[0, :] + b1_exact
+                    bn1_norm = np.divide(b1_exact, col_sums_adj, out=np.zeros_like(b1_exact), where=col_sums_adj != 0)
+                else:
+                    b1_exact = np.array([exact_banzhaf_first_agent_subset(W, q) for q in quotas])
+                    col_sums_adj = col_sums - b_grid[0, :] + b1_exact
+                    bn1_norm = np.divide(b1_exact, col_sums_adj, out=np.zeros_like(b1_exact), where=col_sums_adj != 0)
+            else:
+                bn1_norm = np.divide(b_grid[0, :], col_sums, out=np.zeros_like(col_sums), where=col_sums != 0)
+
+            first_agent_ratios[m, :] = bn1_norm / w_norm[0]
+
         mean_ratio, _, _ = summarize_mean_ci(first_agent_ratios)
         s2, _, _ = summarize_variance_ci(first_agent_ratios)
         s2 = np.maximum(s2, VARIANCE_EPS)
@@ -332,11 +434,11 @@ def run_intergroup_variance_multi_params(param_settings, n, M, rp, out_dir, mast
 if __name__ == "__main__":
     # Base configuration
     default_n = 50
-    M = 30
+    M = 20
     rp = 15000
 
     # Output Directories
-    plots_intergroup_root = os.path.join("plots2", "intergroup_variance")
+    plots_intergroup_root = os.path.join("plots2", "intergroup_variance_exact_first_agent")
 
     os.makedirs(plots_intergroup_root, exist_ok=True)
 
@@ -368,6 +470,15 @@ if __name__ == "__main__":
     intergroup_q_ratios = quota_sets['full_0_1_101']
     intergroup_q_fixed = 0.07
 
+    # Exact Banzhaf (first agent only)
+    USE_EXACT_FIRST_AGENT = True
+    EXACT_FIRST_AGENT_MAX_N = 80
+    EXACT_FIRST_AGENT_METHOD = "dp_int"  # "subset" (float exact) or "dp_int" (integer DP)
+    EXACT_DP_WEIGHT_SCALE = 10000
+    EXACT_DP_MAX_TOTAL = 200000
+    EXACT_DP_MODE = "normalized"  # "normalized" or "raw"
+    EXACT_DP_ALLOW_RESCALE = True
+
     # Reproducible master seed (all randomness derives from this)
     master_seed = 42
 
@@ -382,7 +493,12 @@ if __name__ == "__main__":
 
     job_idx += 1
     print(f"[{job_idx}/{total_jobs}] First Agent Variance Multi-n")
-    run_first_agent_variance_multi_n(alpha, theta, intergroup_n_list, M, rp, plots_intergroup_root, master_seed, intergroup_q_ratios)
+    run_first_agent_variance_multi_n(
+        alpha, theta, intergroup_n_list, M, rp, plots_intergroup_root, master_seed, intergroup_q_ratios,
+        use_exact=USE_EXACT_FIRST_AGENT, exact_max_n=EXACT_FIRST_AGENT_MAX_N,
+        exact_method=EXACT_FIRST_AGENT_METHOD, dp_weight_scale=EXACT_DP_WEIGHT_SCALE,
+        dp_max_total=EXACT_DP_MAX_TOTAL, dp_mode=EXACT_DP_MODE, dp_allow_rescale=EXACT_DP_ALLOW_RESCALE
+    )
 
     job_idx += 1
     print(f"[{job_idx}/{total_jobs}] Intergroup Mean+Variance Multi-n")
