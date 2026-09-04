@@ -1,5 +1,9 @@
-# Project-Catalyst
+# Proportionality in Stake-based Voting
 
+This repository was developed as part of Project Catalyst proposal [#1300163: Proportionality in Stake-based Voting](https://milestones.projectcatalyst.io/projects/1300163/). The resulting paper, [*Swimming with Whales: Analysis of Power Imbalances in Stake-Weighted Voting*](https://arxiv.org/abs/2605.19264), studies the relationship between stake ownership and voting power, combining theoretical results with an empirical analysis of Project Catalyst data.
+
+
+### This Repository:
 Single entry point: `main.py`. It runs all analyses and produces all plots with clear console progress. Optional: `fitting.py` fits a Gamma distribution to `data.csv` to supply realistic parameters.
 
 **Goal**
